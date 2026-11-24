@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="theme-color" content="#17365d">
+  <title>부품 바코드 스캐너</title>
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#f4f6f9;color:#202124;font-family:Arial,'Noto Sans KR',sans-serif}
+    header{background:#17365d;color:#fff;padding:18px;font-size:19px;font-weight:700}
+    main{max-width:560px;margin:auto;padding:16px}.card{background:#fff;border-radius:14px;padding:16px;margin:12px 0;box-shadow:0 1px 5px #0001}
+    button{width:100%;border:0;border-radius:10px;padding:14px;margin:6px 0;background:#185abc;color:#fff;font-size:16px;font-weight:700}
+    button.secondary{background:#e8eef8;color:#17365d}#reader{width:100%;overflow:hidden;border-radius:10px;margin-top:12px}
+    input{width:100%;padding:13px;border:1px solid #ccd2da;border-radius:9px;font-size:17px;margin:8px 0}
+    .muted{font-size:13px;color:#667085;line-height:1.5}.status{font-size:14px;line-height:1.5;overflow-wrap:anywhere}.error{color:#b3261e}.ok{color:#137333}
+  </style>
+</head>
+<body>
+<header>부품 바코드 스캐너</header>
+<main>
+  <section class="card">
+    <p class="muted">카메라를 바코드에 비추세요. 인식되면 기존 재고관리 화면으로 자동 전달됩니다.</p>
+    <button id="startBtn" onclick="startScan()">카메라 켜기</button>
+    <button class="secondary" onclick="stopScan()">카메라 끄기</button>
+    <div id="reader"></div>
+    <p id="status" class="status">카메라 켜기를 눌러 시작하세요.</p>
+  </section>
+  <section class="card">
+    <b>카메라가 작동하지 않으면</b>
+    <p class="muted">바코드 번호를 직접 입력해 전달할 수도 있습니다.</p>
+    <input id="manualCode" placeholder="바코드 번호 입력" autocomplete="off">
+    <button onclick="sendManual()">번호 전달</button>
+  </section>
+</main>
+<script>
+let scanner = null;
+let busy = false;
+function status(text, error=false){const e=document.getElementById('status');e.textContent=text;e.className='status '+(error?'error':'');}
+async function startScan(){
+  try{
+    if(!window.isSecureContext) throw new Error('HTTPS 주소에서 열어야 카메라를 사용할 수 있습니다.');
+    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('이 브라우저는 카메라 API를 지원하지 않습니다. Chrome에서 열어주세요.');
+    if(!scanner) scanner=new Html5Qrcode('reader');
+    if(scanner.isScanning) await scanner.stop();
+    const config={fps:10,qrbox:{width:260,height:150},aspectRatio:1.6};
+    const onSuccess=async decodedText=>{
+      if(busy)return; busy=true;
+      status('바코드 인식 완료. 재고관리 화면으로 전달합니다.');
+      try{if(scanner && scanner.isScanning) await scanner.stop();}catch(e){}
+      sendCode(decodedText);
+    };
+    status('카메라 연결 중…');
+    try{
+      await scanner.start({facingMode:'environment'},config,onSuccess,()=>{});
+    }catch(firstError){
+      const cameras=await Html5Qrcode.getCameras();
+      if(!cameras || !cameras.length) throw firstError;
+      const rear=cameras.find(c=>/back|rear|environment|후면/i.test(c.label||'')) || cameras[cameras.length-1];
+      await scanner.start(rear.id,config,onSuccess,()=>{});
+    }
+    status('카메라가 켜졌습니다. 바코드를 화면 안에 맞춰주세요.');
+  }catch(e){status('카메라 실행 실패: '+(e.message||e),true);}
+}
+async function stopScan(){try{if(scanner && scanner.isScanning) await scanner.stop();status('카메라를 종료했습니다.');}catch(e){status('카메라 종료 중 오류: '+e.message,true);}}
+function sendCode(code){
+  const value=String(code||'').trim();
+  if(!value){busy=false;status('바코드 번호가 비어 있습니다.',true);return;}
+  if(!window.opener){busy=false;status('재고관리 화면에서 스캐너를 새 창으로 열어야 전달할 수 있습니다.',true);return;}
+  window.opener.postMessage({type:'PARTS_BARCODE_SCANNED',barcode:value},'*');
+  status('전달했습니다. 이 창을 닫아도 됩니다.');
+  setTimeout(()=>window.close(),700);
+}
+function sendManual(){sendCode(document.getElementById('manualCode').value);}
+</script>
+</body>
+</html>
